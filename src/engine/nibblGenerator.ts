@@ -54,10 +54,6 @@ export class NibblGenerator {
   /**
    * Asynchronously cooks one Nibbl card from the highest-spice unseen symbol
    * and pushes it into the local queue.
-   *
-   * 🤖 AGENT TODO:
-   * Wire `cookNextCardAsync` to a background interval / file-save debounce in
-   * `extension.ts` so `queue.length` stays topped up to `codenibbl.preCookedQueueSize` (5).
    */
   public async cookNextCardAsync(
     candidates: CandidateSymbol[],

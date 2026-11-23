@@ -6,7 +6,6 @@ test/**
 .github/**
 tsconfig.json
 esbuild.js
-basic-research.txt
 AGENTS.md
 **/*.map
 **/*.ts
