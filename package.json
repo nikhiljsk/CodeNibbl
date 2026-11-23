@@ -1,0 +1,179 @@
+{
+  "name": "codenibbl",
+  "displayName": "CodeNibbl 🐹🌶️ — Spicy Codebase Lore & Snippets",
+  "description": "Stop doomscrolling while your AI cooks! Async, GenZ-styled micro-insights, edge-case glazes, Mermaid maps, and codebase lore powered by any LLM.",
+  "version": "0.1.0",
+  "publisher": "StickyCliff",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nikhiljsk/CodeNibbl.git"
+  },
+  "sponsor": {
+    "url": "https://buymeacoffee.com/nikhiljsk"
+  },
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Education",
+    "Visualization",
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "codebase",
+    "learning",
+    "mermaid",
+    "onboarding",
+    "claude-code",
+    "cursor",
+    "codenibbl"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codenibbl-sidebar",
+          "title": "CodeNibbl",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "codenibbl-sidebar": [
+        {
+          "type": "webview",
+          "id": "codenibbl.feedView",
+          "name": "Spicy Nibbl Feed 🌶️"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "codenibbl.openFeed",
+        "title": "CodeNibbl: Open Spicy Feed 🌶️"
+      },
+      {
+        "command": "codenibbl.spinRandomNibbl",
+        "title": "CodeNibbl: 🎲 Spin a Fresh Nibbl Now"
+      },
+      {
+        "command": "codenibbl.configureModel",
+        "title": "CodeNibbl: 🔑 Connect Model & Set API Key (Secure Keychain)"
+      },
+      {
+        "command": "codenibbl.switchVibe",
+        "title": "CodeNibbl: 🎛️ Switch Vibe Dial (GenZ Hype / Chaos Gremlin / Chill Mentor)"
+      },
+      {
+        "command": "codenibbl.clearSeenLedger",
+        "title": "CodeNibbl: 🧹 Reset Seen Snippet History"
+      },
+      {
+        "command": "codenibbl.githubSponsors",
+        "title": "CodeNibbl: 💖 Sponsor on GitHub (Open Source)"
+      },
+      {
+        "command": "codenibbl.buyMeACoffee",
+        "title": "CodeNibbl: ☕ Buy Nibbl a Coffee (Sponsor Open Source)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "codenibbl.openFeed",
+        "key": "ctrl+shift+n",
+        "mac": "cmd+shift+n"
+      }
+    ],
+    "configuration": {
+      "title": "CodeNibbl",
+      "properties": {
+        "codenibbl.provider": {
+          "type": "string",
+          "enum": [
+            "vscode-lm",
+            "openai",
+            "anthropic",
+            "gemini",
+            "xai",
+            "custom"
+          ],
+          "default": "vscode-lm",
+          "description": "LLM Provider to generate Nibbl cards. API keys are stored securely in your OS Keychain via 'CodeNibbl: Connect Model & Set API Key'."
+        },
+        "codenibbl.modelId": {
+          "type": "string",
+          "default": "gpt-4o-mini",
+          "description": "Model identifier (e.g., gpt-4o-mini, claude-3-5-haiku-latest, gemini-2.5-flash, grok-3-mini)."
+        },
+        "codenibbl.customBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Custom OpenAI-compatible base URL (e.g., http://127.0.0.1:11434/v1 for local Ollama). Must be https:// for remote hosts."
+        },
+        "codenibbl.vibeMode": {
+          "type": "string",
+          "enum": [
+            "genz_hype",
+            "chaos_gremlin",
+            "chill_mentor"
+          ],
+          "default": "genz_hype",
+          "description": "Personality flavor for headlines and explanations."
+        },
+        "codenibbl.autoPopupOnAgentWait": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically reveal CodeNibbl when an AI coding agent or terminal build runs longer than autoOpenDelaySeconds."
+        },
+        "codenibbl.autoOpenDelaySeconds": {
+          "type": "number",
+          "default": 8,
+          "minimum": 2,
+          "maximum": 60,
+          "description": "Seconds to wait after an agent starts cooking before revealing the CodeNibbl feed."
+        },
+        "codenibbl.preCookedQueueSize": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 15,
+          "description": "Number of Nibbl cards to keep pre-generated asynchronously in the local buffer."
+        },
+        "codenibbl.githubSponsorsUrl": {
+          "type": "string",
+          "default": "https://github.com/sponsors/nikhiljsk",
+          "description": "GitHub Sponsors URL (0% platform fee for open source)."
+        },
+        "codenibbl.sponsorUrl": {
+          "type": "string",
+          "default": "https://buymeacoffee.com/nikhiljsk",
+          "description": "Buy Me a Coffee / GitHub Sponsors URL."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production && vsce package",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.93.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
