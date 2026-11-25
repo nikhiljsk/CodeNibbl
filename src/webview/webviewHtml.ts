@@ -62,13 +62,20 @@ export function formatFlexCardMarkdown(card: NibblCard): string {
     );
   }
 
+  if (card.suggestedFix) {
+    parts.push('', '**🛠️ Quick Fix Idea:**', '```' + (card.codeSnippet?.language || 'ts'), card.suggestedFix, '```');
+  }
+
   parts.push('', '*Snacked via [CodeNibbl](https://github.com/nikhiljsk/CodeNibbl) 🌶️*');
   return parts.join('\n');
 }
 
+export type WebviewEmptyState = 'no_workspace' | 'cooking' | 'needs_model';
+
 export function buildWebviewHtml(params: {
   cspSource: string;
-  initialCard: NibblCard;
+  initialCard: NibblCard | null;
+  emptyState?: WebviewEmptyState;
   vibeMode: VibeMode;
   providerLabel: string;
   stats: { nibblsMunched: number; quizzesSolved: number };
@@ -77,15 +84,31 @@ export function buildWebviewHtml(params: {
   const nonce = generateCspNonce();
   const cspHeader = buildStrictCspHeader(params.cspSource, nonce);
   const card = params.initialCard;
+  const emptyState: WebviewEmptyState = params.emptyState ?? 'no_workspace';
+
+  const activeMood = card
+    ? card.mascotMood
+    : emptyState === 'cooking'
+      ? 'cooking'
+      : emptyState === 'needs_model'
+        ? 'hyped'
+        : 'chill';
 
   const mascotSvg = params.customMascotUri
     ? `<img src="${escapeHtml(params.customMascotUri)}" width="44" height="44" alt="Nibbl Mascot" class="custom-mascot-img" />`
-    : MASCOT_SVG_BY_MOOD[card.mascotMood] ?? MASCOT_SVG_BY_MOOD.chill;
+    : MASCOT_SVG_BY_MOOD[activeMood] ?? MASCOT_SVG_BY_MOOD.chill;
 
-  const mascotLabel = MASCOT_LABELS_BY_MOOD[card.mascotMood] ?? '';
-  const flexMarkdown = formatFlexCardMarkdown(card);
+  const mascotLabel = card
+    ? MASCOT_LABELS_BY_MOOD[card.mascotMood] ?? ''
+    : emptyState === 'no_workspace'
+      ? '📂 Open a project folder to begin'
+      : emptyState === 'cooking'
+        ? '🍳 Scanning & cooking from your repo...'
+        : '🔑 Connect a model to cook Nibbls';
 
-  const codeRowsHtml = card.codeSnippet
+  const flexMarkdown = card ? formatFlexCardMarkdown(card) : '';
+
+  const codeRowsHtml = card?.codeSnippet
     ? card.codeSnippet.code
         .split(/\r?\n/)
         .map((lineText, idx) => {
@@ -99,16 +122,18 @@ export function buildWebviewHtml(params: {
         .join('')
     : '';
 
-  const linksHtml = card.codeLinks
-    .map(
-      (link) =>
-        `<button type="button" class="code-link-pill" data-file="${escapeHtml(link.filePath)}" data-line="${link.line}" data-end="${link.endLine ?? link.line}">
-          📍 ${escapeHtml(link.label)}
-        </button>`
-    )
-    .join('');
+  const linksHtml = card
+    ? card.codeLinks
+        .map(
+          (link) =>
+            `<button type="button" class="code-link-pill" data-file="${escapeHtml(link.filePath)}" data-line="${link.line}" data-end="${link.endLine ?? link.line}">
+              📍 ${escapeHtml(link.label)}
+            </button>`
+        )
+        .join('')
+    : '';
 
-  const quizHtml = card.interactiveQuiz
+  const quizHtml = card?.interactiveQuiz
     ? `<div class="quiz-box">
         <div class="quiz-q">🕵️ ${escapeHtml(card.interactiveQuiz.question)}</div>
         <div class="quiz-options">
@@ -125,8 +150,8 @@ export function buildWebviewHtml(params: {
       </div>`
     : '';
 
-  const renderedSvg = card.mermaidDiagram ? renderMermaidToSvg(card.mermaidDiagram) : null;
-  const mermaidHtml = card.mermaidDiagram
+  const renderedSvg = card?.mermaidDiagram ? renderMermaidToSvg(card.mermaidDiagram) : null;
+  const mermaidHtml = card?.mermaidDiagram
     ? `<details class="mermaid-details" open>
         <summary class="mermaid-summary">🗺️ Architecture Flow Map</summary>
         <div class="mermaid-box">
@@ -139,11 +164,68 @@ export function buildWebviewHtml(params: {
       </details>`
     : '';
 
+  const suggestedFixHtml = card?.suggestedFix
+    ? `<details class="mermaid-details">
+        <summary class="mermaid-summary">🛠️ Quick Fix Idea</summary>
+        <div class="mermaid-box">
+          <div class="mermaid-raw">${escapeHtml(card.suggestedFix)}</div>
+        </div>
+      </details>`
+    : '';
+
+  const emptyCardHtml =
+    emptyState === 'no_workspace'
+      ? `<div class="card empty-card">
+          <h2 class="headline">📂 No Project Open Yet</h2>
+          <p class="layman-body">Open a project folder or repository in VS Code, and CodeNibbl will generate bite-sized insights, quizzes, and flow diagrams directly from your actual code.</p>
+          <button type="button" id="btn-open-folder" class="action-btn primary">📂 Open Folder</button>
+        </div>`
+      : emptyState === 'cooking'
+        ? `<div class="card empty-card">
+            <h2 class="headline">🍳 Cooking Fresh Nibbls...</h2>
+            <p class="layman-body">Scanning your open repository and brewing insights from your actual code. This only takes a few seconds!</p>
+            <button type="button" id="btn-spin-empty" class="action-btn primary">🎲 Check Ready Cards</button>
+          </div>`
+        : `<div class="card empty-card">
+            <h2 class="headline">🔑 Connect a Model to Start</h2>
+            <p class="layman-body">Your project is ready! Connect OpenAI, Anthropic, Gemini, Grok, Ollama, or use VS Code's built-in model to generate Nibbls from this codebase.</p>
+            <button type="button" id="btn-model-empty" class="action-btn primary">🔑 Connect Model & API Key</button>
+          </div>`;
+
+  const mainCardHtml = card
+    ? `<div class="card">
+        <div class="badge-row">
+          <span class="archetype-pill">${escapeHtml(card.badgeText)}</span>
+          <span class="scoville-pill">${escapeHtml(card.scovilleTier)} • ${card.scovilleScore} SHU</span>
+        </div>
+
+        <h2 class="headline">${escapeHtml(card.headline)}</h2>
+        <p class="layman-body">${escapeHtml(card.laymanBody)}</p>
+
+        <div class="tldr-box">${escapeHtml(card.whyItMatters)}</div>
+
+        ${card.codeSnippet ? `<div class="code-box">${codeRowsHtml}</div>` : ''}
+
+        ${mermaidHtml}
+
+        ${suggestedFixHtml}
+
+        ${quizHtml}
+
+        <div class="links-wrap">${linksHtml}</div>
+
+        <div class="card-actions-bar">
+          <button type="button" id="btn-cooked" class="action-btn cooked-btn">🔥 You Cooked</button>
+          <button type="button" id="btn-flex" class="action-btn flex-btn">📸 Flex Card</button>
+        </div>
+      </div>`
+    : emptyCardHtml;
+
   const clientData = {
-    cardId: card.id,
+    cardId: card?.id ?? '',
     vibeMode: params.vibeMode,
     flexMarkdown,
-    quizAha: card.interactiveQuiz?.ahaExplanation ?? '',
+    quizAha: card?.interactiveQuiz?.ahaExplanation ?? '',
   };
 
   return `<!DOCTYPE html>
@@ -455,38 +537,15 @@ export function buildWebviewHtml(params: {
     <button type="button" id="btn-model" class="action-btn" title="Connect Model & API Key">🔑 Model</button>
   </div>
 
-  <div class="card">
-    <div class="badge-row">
-      <span class="archetype-pill">${escapeHtml(card.badgeText)}</span>
-      <span class="scoville-pill">${escapeHtml(card.scovilleTier)} • ${card.scovilleScore} SHU</span>
-    </div>
-
-    <h2 class="headline">${escapeHtml(card.headline)}</h2>
-    <p class="layman-body">${escapeHtml(card.laymanBody)}</p>
-
-    <div class="tldr-box">${escapeHtml(card.whyItMatters)}</div>
-
-    ${
-      card.codeSnippet
-        ? `<div class="code-box">${codeRowsHtml}</div>`
-        : ''
-    }
-
-    ${mermaidHtml}
-
-    ${quizHtml}
-
-    <div class="links-wrap">${linksHtml}</div>
-
-    <div class="card-actions-bar">
-      <button type="button" id="btn-cooked" class="action-btn cooked-btn">🔥 You Cooked</button>
-      <button type="button" id="btn-flex" class="action-btn flex-btn">📸 Flex Card</button>
-    </div>
-  </div>
+  ${mainCardHtml}
 
   <div class="footer-bar">
-    <button type="button" id="btn-spin" class="action-btn primary">🎲 Spin Fresh Nibbl</button>
-    <button type="button" id="btn-vibe" class="action-btn">🎛️ Vibe: ${escapeHtml(params.vibeMode)}</button>
+    ${
+      card
+        ? `<button type="button" id="btn-spin" class="action-btn primary">🎲 Spin Fresh Nibbl</button>
+           <button type="button" id="btn-vibe" class="action-btn">🎛️ Vibe: ${escapeHtml(params.vibeMode)}</button>`
+        : ''
+    }
     <button type="button" id="btn-sponsors" class="action-btn sponsor-btn" title="Sponsor CodeNibbl on GitHub (0% fee)">💖 GitHub Sponsors</button>
     <button type="button" id="btn-coffee" class="action-btn coffee-btn" title="Buy Nibbl a Coffee">☕ Buy Me a Coffee</button>
   </div>
@@ -572,6 +631,27 @@ export function buildWebviewHtml(params: {
           setTimeout(() => {
             btnFlex.textContent = '📸 Flex Card';
           }, 2000);
+        });
+      }
+
+      const btnOpenFolder = document.getElementById('btn-open-folder');
+      if (btnOpenFolder) {
+        btnOpenFolder.addEventListener('click', () => {
+          vscode.postMessage({ type: 'OPEN_FOLDER' });
+        });
+      }
+
+      const btnSpinEmpty = document.getElementById('btn-spin-empty');
+      if (btnSpinEmpty) {
+        btnSpinEmpty.addEventListener('click', () => {
+          vscode.postMessage({ type: 'SPIN_NEXT_NIBBL' });
+        });
+      }
+
+      const btnModelEmpty = document.getElementById('btn-model-empty');
+      if (btnModelEmpty) {
+        btnModelEmpty.addEventListener('click', () => {
+          vscode.postMessage({ type: 'CONFIGURE_MODEL' });
         });
       }
 

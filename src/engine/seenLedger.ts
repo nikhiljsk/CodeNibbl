@@ -14,6 +14,7 @@ import {
 } from '../types';
 
 export const ALL_ARCHETYPES: NibblArchetype[] = [
+  'MISSED_EDGE_CASE',
   'GLAZE_THE_DEV',
   'DID_YOU_KNOW',
   'CAUGHT_IN_4K',
@@ -148,6 +149,96 @@ export class SeenLedger {
   }
 
   /**
+   * Selects a diverse batch of up to `batchSize` (default 5) unseen candidates
+   * for the "Tournament of 5" LLM curation prompt.
+   *
+   * Prioritizes:
+   * 1. Distinct file paths so the LLM compares genuinely different parts of the repo.
+   * 2. Symbols with unused archetype slots (< MAX_LENSES_PER_SYMBOL).
+   * 3. Non-cooldown archetypes so the feed stays varied.
+   */
+  public pickTournamentBatch(
+    candidates: CandidateSymbol[],
+    batchSize = 5
+  ): {
+    batch: CandidateSymbol[];
+    allowedArchetypes: NibblArchetype[];
+    hookStyle: string;
+  } | null {
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    const cooldownSet = new Set(this.state.recentArchetypes.slice(-ARCHETYPE_COOLDOWN_WINDOW));
+    const allowedArchetypes = ALL_ARCHETYPES.filter((a) => !cooldownSet.has(a));
+    const effectiveAllowed = allowedArchetypes.length > 0 ? allowedArchetypes : [...ALL_ARCHETYPES];
+
+    const selected: CandidateSymbol[] = [];
+    const seenFiles = new Set<string>();
+    const selectedKeys = new Set<string>();
+
+    const isEligible = (symbol: CandidateSymbol): boolean => {
+      const symbolKey = SeenLedger.buildSymbolKey(symbol);
+      const usedArchetypes = this.state.symbolArchetypeHistory[symbolKey] ?? [];
+      if (usedArchetypes.length >= MAX_LENSES_PER_SYMBOL) {
+        return false;
+      }
+      return effectiveAllowed.some(
+        (arch) => !this.hasSeenCombo(symbol, arch) && !usedArchetypes.includes(arch)
+      );
+    };
+
+    // Pass 1: Pick highest-ranked eligible symbols from distinct files
+    for (const symbol of candidates) {
+      if (selected.length >= batchSize) {
+        break;
+      }
+      if (seenFiles.has(symbol.filePath) || !isEligible(symbol)) {
+        continue;
+      }
+      selected.push(symbol);
+      seenFiles.add(symbol.filePath);
+      selectedKeys.add(`${symbol.filePath}::${symbol.symbolName}`);
+    }
+
+    // Pass 2: Top up remaining slots from same files if repo has fewer than `batchSize` files
+    if (selected.length < batchSize) {
+      for (const symbol of candidates) {
+        if (selected.length >= batchSize) {
+          break;
+        }
+        const key = `${symbol.filePath}::${symbol.symbolName}`;
+        if (selectedKeys.has(key) || !isEligible(symbol)) {
+          continue;
+        }
+        selected.push(symbol);
+        selectedKeys.add(key);
+      }
+    }
+
+    if (selected.length === 0) {
+      // Fallback: relax lens cap if all symbols have been visited
+      const fallback = this.pickNextFreshTarget(candidates);
+      if (!fallback) {
+        return null;
+      }
+      return {
+        batch: [fallback.symbol],
+        allowedArchetypes: [fallback.archetype],
+        hookStyle: fallback.hookStyle,
+      };
+    }
+
+    const hookStyle =
+      OPENING_HOOK_STYLES[this.state.hookCadenceIndex % OPENING_HOOK_STYLES.length];
+    return {
+      batch: selected,
+      allowedArchetypes: effectiveAllowed,
+      hookStyle,
+    };
+  }
+
+  /**
    * Records a newly generated Nibbl card into the 6-Layer Anti-Repetition Ledger.
    */
   public recordGeneratedNibbl(params: {
@@ -213,7 +304,14 @@ export class SeenLedger {
     const signals = new Set(symbol.spiceSignals);
 
     if (signals.has('FRESH_OUT_THE_OVEN')) {
-      prioritized.push('AI_VIBE_AUDIT');
+      prioritized.push('AI_VIBE_AUDIT', 'MISSED_EDGE_CASE');
+    }
+    if (
+      signals.has('CONCURRENCY_TIME_TRAVEL') ||
+      signals.has('HIGH_STAKES_DANGER_ZONE') ||
+      symbol.cognitiveComplexity >= 40
+    ) {
+      prioritized.push('MISSED_EDGE_CASE');
     }
     if (signals.has('EDGE_CASE_ARMOR') || signals.has('BOUNDARY_NINJA')) {
       prioritized.push('GLAZE_THE_DEV', 'PLOT_TWIST_QUIZ');

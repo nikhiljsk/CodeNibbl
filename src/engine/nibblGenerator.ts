@@ -16,8 +16,11 @@ import {
   NibblCard,
   VibeMode,
 } from '../types';
-import { SeenLedger } from './seenLedger';
-import { ARCHETYPE_METADATA, buildNibblPrompt } from './promptBuilder';
+import { ALL_ARCHETYPES, SeenLedger } from './seenLedger';
+import {
+  ARCHETYPE_METADATA,
+  buildTournamentPrompt,
+} from './promptBuilder';
 import { sanitizeMermaidDiagram } from './mermaidSanitizer';
 import { UniversalLLMRouter } from '../llm/universalRouter';
 
@@ -40,20 +43,16 @@ export class NibblGenerator {
   }
 
   /**
-   * Pops the next pre-cooked card from the queue (or returns a starter demo card
-   * if the workspace hasn't been harvested yet).
+   * Pops the next pre-cooked card from the queue, or returns `null` when empty.
    */
-  public popNextCard(): NibblCard {
-    const next = this.queue.shift();
-    if (next) {
-      return next;
-    }
-    return this.createStarterDemoCard();
+  public popNextCard(): NibblCard | null {
+    return this.queue.shift() ?? null;
   }
 
   /**
-   * Asynchronously cooks one Nibbl card from the highest-spice unseen symbol
-   * and pushes it into the local queue.
+   * Asynchronously runs a "Tournament of 5 + Adversarial Edge-Case Audit"
+   * over up to 5 diverse unseen candidates and pushes the winning card into
+   * the local queue.
    */
   public async cookNextCardAsync(
     candidates: CandidateSymbol[],
@@ -63,18 +62,18 @@ export class NibblGenerator {
       return null;
     }
 
-    const pick = this.seenLedger.pickNextFreshTarget(candidates);
-    if (!pick) {
+    const tournament = this.seenLedger.pickTournamentBatch(candidates, 5);
+    if (!tournament) {
       return null;
     }
 
     this.isCooking = true;
     try {
-      const { systemPrompt, userPrompt } = buildNibblPrompt({
-        symbol: pick.symbol,
-        archetype: pick.archetype,
+      const { systemPrompt, userPrompt } = buildTournamentPrompt({
+        batch: tournament.batch,
+        allowedArchetypes: tournament.allowedArchetypes,
         vibeMode,
-        hookStyle: pick.hookStyle,
+        hookStyle: tournament.hookStyle,
         doNotRepeatBlock: this.seenLedger.buildDoNotRepeatPromptBlock(),
       });
 
@@ -83,10 +82,15 @@ export class NibblGenerator {
         userPrompt,
       });
 
-      const card = this.parseAndSanitizeCard(rawJson, pick.symbol, pick.archetype);
+      const { card, winner } = this.resolveTournamentCard(
+        rawJson,
+        tournament.batch,
+        tournament.allowedArchetypes[0] ?? 'MISSED_EDGE_CASE'
+      );
+
       this.seenLedger.recordGeneratedNibbl({
-        symbol: pick.symbol,
-        archetype: pick.archetype,
+        symbol: winner,
+        archetype: card.archetype,
         headline: card.headline,
         whyItMatters: card.whyItMatters,
       });
@@ -99,7 +103,44 @@ export class NibblGenerator {
   }
 
   /**
-   * Parses raw LLM JSON output and enforces strict bounds + Mermaid sanitization.
+   * Resolves the LLM's `winningCandidateIndex` and `selectedArchetype` from a
+   * Tournament JSON response, binding file paths & line numbers deterministically
+   * to the chosen `CandidateSymbol`.
+   */
+  public resolveTournamentCard(
+    rawJsonText: string,
+    batch: CandidateSymbol[],
+    fallbackArchetype: NibblArchetype
+  ): { card: NibblCard; winner: CandidateSymbol } {
+    const cleanedJson = rawJsonText
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/```\s*$/i, '')
+      .trim();
+
+    const parsed = JSON.parse(cleanedJson) as Record<string, unknown>;
+
+    const rawIdx =
+      typeof parsed.winningCandidateIndex === 'number' &&
+      Number.isFinite(parsed.winningCandidateIndex)
+        ? Math.floor(parsed.winningCandidateIndex)
+        : 0;
+    const winnerIdx = Math.min(Math.max(0, rawIdx), Math.max(0, batch.length - 1));
+    const winner = batch[winnerIdx];
+
+    const rawArchetype = parsed.selectedArchetype;
+    const archetype: NibblArchetype =
+      typeof rawArchetype === 'string' &&
+      (ALL_ARCHETYPES as string[]).includes(rawArchetype)
+        ? (rawArchetype as NibblArchetype)
+        : fallbackArchetype;
+
+    const card = this.buildCardFromParsed(parsed, winner, archetype);
+    return { card, winner };
+  }
+
+  /**
+   * Parses raw LLM JSON output for a single symbol and enforces strict bounds
+   * + Mermaid sanitization.
    */
   public parseAndSanitizeCard(
     rawJsonText: string,
@@ -112,6 +153,14 @@ export class NibblGenerator {
       .trim();
 
     const parsed = JSON.parse(cleanedJson) as Record<string, unknown>;
+    return this.buildCardFromParsed(parsed, symbol, archetype);
+  }
+
+  private buildCardFromParsed(
+    parsed: Record<string, unknown>,
+    symbol: CandidateSymbol,
+    archetype: NibblArchetype
+  ): NibblCard {
     const meta = ARCHETYPE_METADATA[archetype];
 
     const headline =
@@ -159,6 +208,11 @@ export class NibblGenerator {
       }
     }
 
+    const suggestedFix =
+      typeof parsed.suggestedFix === 'string' && parsed.suggestedFix.trim()
+        ? parsed.suggestedFix.trim().slice(0, 360)
+        : undefined;
+
     return {
       id: crypto.randomUUID(),
       archetype,
@@ -179,6 +233,7 @@ export class NibblGenerator {
       },
       mermaidDiagram: safeMermaid,
       interactiveQuiz,
+      suggestedFix,
       codeLinks: [
         {
           label: `${symbol.symbolName}() • ${symbol.filePath}:${symbol.startLine}`,

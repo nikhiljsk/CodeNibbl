@@ -1,11 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   chunkFileByRegex,
+  computeCognitiveComplexity,
   createSafeCandidateSymbol,
   detectLanguageFromPath,
   harvestWorkspaceSymbols,
+  isMundaneBoilerplate,
+  linkSymbolCallGraph,
 } from '../src/harvester/spiceHarvester';
 import { SeenLedger } from '../src/engine/seenLedger';
+import { NibblGenerator } from '../src/engine/nibblGenerator';
 import { sanitizeMermaidDiagram } from '../src/engine/mermaidSanitizer';
 import { UniversalLLMRouter } from '../src/llm/universalRouter';
 
@@ -82,6 +86,71 @@ const verifyUser = async (id: string) => {
     const symbols = await harvestWorkspaceSymbols();
     expect(Array.isArray(symbols)).toBe(true);
   });
+
+  it('filters out mundane env-var readers, config getters, and flat plumbing', () => {
+    const envReader = `
+      export function getPort() {
+        return process.env.PORT ?? '3000';
+      }
+    `;
+    const simpleGetter = `
+      getUserName() {
+        return this.userName;
+      }
+    `;
+    const realBusinessLogic = `
+      export async function processRefund(orderId: string, amount: number) {
+        if (!orderId || amount <= 0) {
+          throw new Error('Invalid refund');
+        }
+        if (this.inFlight.has(orderId)) {
+          return { status: 'duplicate' };
+        }
+        this.inFlight.add(orderId);
+        const result = await gateway.refund(orderId, amount);
+        return result;
+      }
+    `;
+
+    expect(isMundaneBoilerplate('getPort', envReader)).toBe(true);
+    expect(isMundaneBoilerplate('getUserName', simpleGetter)).toBe(true);
+    expect(isMundaneBoilerplate('processRefund', realBusinessLogic)).toBe(false);
+    expect(computeCognitiveComplexity(realBusinessLogic)).toBeGreaterThanOrEqual(40);
+  });
+
+  it('links cross-function callsTo and calledBy relationships', () => {
+    const helper = createSafeCandidateSymbol({
+      filePath: 'src/auth/verify.ts',
+      symbolName: 'verifySignature',
+      startLine: 1,
+      endLine: 10,
+      language: 'typescript',
+      rawCode: 'if (!sig && !secret) { return false; } return true;',
+    })!;
+
+    const caller1 = createSafeCandidateSymbol({
+      filePath: 'src/api/webhook.ts',
+      symbolName: 'handleWebhook',
+      startLine: 1,
+      endLine: 12,
+      language: 'typescript',
+      rawCode: 'if (!verifySignature(req)) { return 401; }',
+    })!;
+
+    const caller2 = createSafeCandidateSymbol({
+      filePath: 'src/api/admin.ts',
+      symbolName: 'handleAdminHook',
+      startLine: 1,
+      endLine: 12,
+      language: 'typescript',
+      rawCode: 'if (!verifySignature(req)) { return 403; }',
+    })!;
+
+    linkSymbolCallGraph([helper, caller1, caller2]);
+    expect(caller1.callsTo).toContain('verifySignature');
+    expect(helper.calledBy).toEqual(['handleWebhook', 'handleAdminHook']);
+    expect(helper.spiceSignals).toContain('MAIN_CHARACTER_HUB');
+  });
 });
 
 describe('6-Layer Anti-Repetition Engine (SeenLedger)', () => {
@@ -122,6 +191,48 @@ describe('6-Layer Anti-Repetition Engine (SeenLedger)', () => {
 
     const doNotRepeat = ledger.buildDoNotRepeatPromptBlock();
     expect(doNotRepeat).toContain('Headline 1');
+  });
+
+  it('selects a diverse Tournament of 5 batch across distinct files and records only the winner', async () => {
+    const candidates = ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts', 'f.ts'].map((file, idx) =>
+      createSafeCandidateSymbol({
+        filePath: `src/${file}`,
+        symbolName: `processItem${idx}`,
+        startLine: 10,
+        endLine: 25,
+        language: 'typescript',
+        rawCode: `if (x > ${idx} && y < 10) { return x + y; } return 0;`,
+      })!
+    );
+
+    const ledger = new SeenLedger();
+    const tournament = ledger.pickTournamentBatch(candidates, 5);
+    expect(tournament).not.toBeNull();
+    expect(tournament!.batch).toHaveLength(5);
+
+    const mockRouter = {
+      generateJson: vi.fn(async () =>
+        JSON.stringify({
+          winningCandidateIndex: 2,
+          selectedArchetype: 'MISSED_EDGE_CASE',
+          headline: 'Watch out: processItem2() silently drops negative inputs 🚨',
+          laymanBody: 'If `x` is negative, line 10 skips validation and returns 0.',
+          whyItMatters: '💡 Negative quantities can look like zero-cost orders.',
+          suggestedFix: 'if (x < 0) throw new Error("Negative input");',
+        })
+      ),
+    } as unknown as UniversalLLMRouter;
+
+    const generator = new NibblGenerator(ledger, mockRouter);
+    const card = await generator.cookNextCardAsync(candidates, 'genz_hype');
+
+    expect(card).not.toBeNull();
+    expect(card!.archetype).toBe('MISSED_EDGE_CASE');
+    expect(card!.badgeText).toBe('🚨 BLIND SPOT SPOTTED');
+    expect(card!.codeSnippet?.filePath).toBe('src/c.ts');
+    expect(card!.suggestedFix).toContain('Negative input');
+    expect(ledger.hasSeenCombo(candidates[2], 'MISSED_EDGE_CASE')).toBe(true);
+    expect(ledger.hasSeenCombo(candidates[0], 'MISSED_EDGE_CASE')).toBe(false);
   });
 });
 

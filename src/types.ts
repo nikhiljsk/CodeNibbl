@@ -29,9 +29,10 @@ export type MascotMood =
   | 'hyped';
 
 /**
- * The 10 Rotating GenZ Card Archetypes
+ * The 11 Rotating GenZ Card Archetypes
  */
 export type NibblArchetype =
+  | 'MISSED_EDGE_CASE'    // 🚨 Spots a real blind spot, race condition, or unhandled boundary
   | 'GLAZE_THE_DEV'       // 👑 Hypes up a smart edge-case guard or clean optimization
   | 'DID_YOU_KNOW'        // 🤯 Uncovers hidden codebase lore or sneaky side-effects
   | 'CAUGHT_IN_4K'        // 📸 Playfully spotlights a funny TODO, HACK, or magic number
@@ -99,6 +100,12 @@ export interface CandidateSymbol {
   };
   /** Neighbouring symbols / imports for Mermaid diagram accuracy */
   relatedSymbols: string[];
+  /** Structural nesting, async state-mutation, & branching complexity score */
+  cognitiveComplexity: number;
+  /** Other candidate symbols invoked by this function */
+  callsTo: string[];
+  /** Other candidate symbols that invoke this function */
+  calledBy: string[];
 }
 
 export interface NibblCodeLink {
@@ -136,13 +143,15 @@ export interface NibblCard {
   };
   /** Pre-sanitized Mermaid flowchart TD or sequenceDiagram */
   mermaidDiagram?: string;
-  /** Optional 1-tap micro-quiz for PLOT_TWIST_QUIZ */
+  /** Optional 1-tap micro-quiz for PLOT_TWIST_QUIZ / MISSED_EDGE_CASE */
   interactiveQuiz?: {
     question: string;
     options: string[];
     correctIndex: number;
     ahaExplanation: string;
   };
+  /** Optional 1–4 line code fix when an unhandled edge case is spotted */
+  suggestedFix?: string;
   /** Clickable deep-links to teleport straight to the code */
   codeLinks: NibblCodeLink[];
   createdAt: number;
@@ -186,6 +195,7 @@ export type WebviewIncomingMessage =
   | { type: 'QUIZ_SOLVED'; cardId: string }
   | { type: 'FLEX_CARD_COPY'; markdown: string }
   | { type: 'CONFIGURE_MODEL' }
+  | { type: 'OPEN_FOLDER' }
   | { type: 'GITHUB_SPONSORS' }
   | { type: 'BUY_ME_A_COFFEE' };
 

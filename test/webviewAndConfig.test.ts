@@ -103,6 +103,46 @@ describe('Webview HTML Builder & Mascot Assets', () => {
     // Must parse cleanly as valid JavaScript (throws SyntaxError if broken)
     expect(() => new Function(scriptBody)).not.toThrow();
   });
+
+  it('renders clean No Project Open empty state when no workspace is open', () => {
+    const html = buildWebviewHtml({
+      cspSource: 'vscode-webview://test',
+      initialCard: null,
+      emptyState: 'no_workspace',
+      vibeMode: 'genz_hype',
+      providerLabel: 'vscode-lm',
+      stats: { nibblsMunched: 0, quizzesSolved: 0 },
+    });
+
+    expect(html).toContain('No Project Open Yet');
+    expect(html).toContain('id="btn-open-folder"');
+    expect(html).not.toContain('scrubSecretsFromText');
+
+    const match = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/);
+    expect(match).not.toBeNull();
+    expect(() => new Function(match![1])).not.toThrow();
+  });
+
+  it('escapes and renders suggestedFix on MISSED_EDGE_CASE cards', () => {
+    const cardWithFix: NibblCard = {
+      ...sampleCard,
+      archetype: 'MISSED_EDGE_CASE',
+      badgeText: '🚨 BLIND SPOT SPOTTED',
+      suggestedFix: 'if (!items?.length) return []; <script>alert(1)</script>',
+    };
+
+    const html = buildWebviewHtml({
+      cspSource: 'vscode-webview://test',
+      initialCard: cardWithFix,
+      vibeMode: 'genz_hype',
+      providerLabel: 'openai',
+      stats: { nibblsMunched: 1, quizzesSolved: 0 },
+    });
+
+    expect(html).toContain('🛠️ Quick Fix Idea');
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(html).not.toContain('alert(1)</script>');
+  });
 });
 
 describe('SecretManager & Keychain Storage', () => {

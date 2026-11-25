@@ -93,6 +93,7 @@ export function validateWebviewMessage(raw: unknown): WebviewIncomingMessage | n
     case 'READY':
     case 'SPIN_NEXT_NIBBL':
     case 'CONFIGURE_MODEL':
+    case 'OPEN_FOLDER':
     case 'GITHUB_SPONSORS':
     case 'BUY_ME_A_COFFEE':
       return { type: msg.type };

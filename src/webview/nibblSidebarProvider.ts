@@ -14,23 +14,29 @@ import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { NibblGenerator } from '../engine/nibblGenerator';
 import { SeenLedger } from '../engine/seenLedger';
-import { buildWebviewHtml } from './webviewHtml';
+import { buildWebviewHtml, WebviewEmptyState } from './webviewHtml';
 import {
   isSafeSponsorUrl,
   resolveSafeWorkspaceFilePath,
   validateWebviewMessage,
 } from '../security/pathValidator';
-import { VibeMode } from '../types';
+import { NibblCard, VibeMode } from '../types';
 
 export class NibblSidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'codenibbl.feedView';
   private view?: vscode.WebviewView;
+  private currentCard: NibblCard | null = null;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly generator: NibblGenerator,
-    private readonly seenLedger: SeenLedger
+    private readonly seenLedger: SeenLedger,
+    private readonly onRequestCook?: () => void
   ) {}
+
+  public hasDisplayedCard(): boolean {
+    return this.currentCard !== null;
+  }
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -54,18 +60,25 @@ export class NibblSidebarProvider implements vscode.WebviewViewProvider {
 
       switch (msg.type) {
         case 'SPIN_NEXT_NIBBL':
-          this.renderCurrentCard();
+          this.renderCurrentCard(true);
+          if (!this.currentCard && this.onRequestCook) {
+            this.onRequestCook();
+          }
+          break;
+
+        case 'OPEN_FOLDER':
+          await vscode.commands.executeCommand('workbench.action.files.openFolder');
           break;
 
         case 'CONFIGURE_MODEL':
           await vscode.commands.executeCommand('codenibbl.configureModel');
-          this.renderCurrentCard();
+          this.renderCurrentCard(false);
           break;
 
         case 'SWITCH_VIBE': {
           const config = vscode.workspace.getConfiguration('codenibbl');
           await config.update('vibeMode', msg.vibeMode, vscode.ConfigurationTarget.Global);
-          this.renderCurrentCard();
+          this.renderCurrentCard(false);
           break;
         }
 
@@ -95,40 +108,65 @@ export class NibblSidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public renderCurrentCard(): void {
+  public renderCurrentCard(advanceQueue = true): void {
     if (!this.view) {
       return;
     }
+
     const config = vscode.workspace.getConfiguration('codenibbl');
     const vibeMode = config.get<VibeMode>('vibeMode', 'genz_hype');
     const provider = config.get<string>('provider', 'vscode-lm');
-    const card = this.generator.popNextCard();
+    const hasWorkspace = Boolean(vscode.workspace.workspaceFolders?.length);
+
+    let card: NibblCard | null = null;
+    let emptyState: WebviewEmptyState | undefined;
+
+    if (!hasWorkspace) {
+      this.currentCard = null;
+      emptyState = 'no_workspace';
+    } else {
+      if (advanceQueue || !this.currentCard) {
+        const next = this.generator.popNextCard();
+        if (next) {
+          this.currentCard = next;
+        } else if (advanceQueue) {
+          this.currentCard = null;
+        }
+      }
+      card = this.currentCard;
+      if (!card) {
+        emptyState = this.generator.getIsCooking() ? 'cooking' : 'needs_model';
+      }
+    }
 
     // Check if custom mascot art exists in media/mascot/<mood>.svg
     let customMascotUri: string | undefined;
-    try {
-      const mascotFileName = `${card.mascotMood}.svg`;
-      const customMascotDiskPath = vscode.Uri.joinPath(
-        this.extensionUri,
-        'media',
-        'mascot',
-        mascotFileName
-      ).fsPath;
+    if (card) {
+      try {
+        const mascotFileName = `${card.mascotMood}.svg`;
+        const customMascotDiskPath = vscode.Uri.joinPath(
+          this.extensionUri,
+          'media',
+          'mascot',
+          mascotFileName
+        ).fsPath;
 
-      if (fs.existsSync(customMascotDiskPath)) {
-        customMascotUri = this.view.webview
-          .asWebviewUri(
-            vscode.Uri.joinPath(this.extensionUri, 'media', 'mascot', mascotFileName)
-          )
-          .toString();
+        if (fs.existsSync(customMascotDiskPath)) {
+          customMascotUri = this.view.webview
+            .asWebviewUri(
+              vscode.Uri.joinPath(this.extensionUri, 'media', 'mascot', mascotFileName)
+            )
+            .toString();
+        }
+      } catch {
+        customMascotUri = undefined;
       }
-    } catch {
-      customMascotUri = undefined;
     }
 
     this.view.webview.html = buildWebviewHtml({
       cspSource: this.view.webview.cspSource,
       initialCard: card,
+      emptyState,
       vibeMode,
       providerLabel: provider,
       stats: this.seenLedger.getState().stats,

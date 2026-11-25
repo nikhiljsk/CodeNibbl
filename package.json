@@ -1,8 +1,8 @@
 {
   "name": "codenibbl",
-  "displayName": "CodeNibbl 🐹🌶️ — Spicy Codebase Lore & Snippets",
-  "description": "Stop doomscrolling while your AI cooks! Async, GenZ-styled micro-insights, edge-case glazes, Mermaid maps, and codebase lore powered by any LLM.",
-  "version": "0.1.0",
+  "displayName": "CodeNibbl — Snack on Your Codebase While AI Codes",
+  "description": "Stop doomscrolling while your AI codes! Async bite-sized codebase insights, edge-case highlights, interactive quizzes, and flow diagrams powered by any LLM.",
+  "version": "0.2.0",
   "publisher": "StickyCliff",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -51,14 +51,14 @@
         {
           "type": "webview",
           "id": "codenibbl.feedView",
-          "name": "Spicy Nibbl Feed 🌶️"
+          "name": "Nibbl Feed"
         }
       ]
     },
     "commands": [
       {
         "command": "codenibbl.openFeed",
-        "title": "CodeNibbl: Open Spicy Feed 🌶️"
+        "title": "CodeNibbl: Open Feed"
       },
       {
         "command": "codenibbl.spinRandomNibbl",

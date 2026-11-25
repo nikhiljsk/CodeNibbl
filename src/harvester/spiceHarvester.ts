@@ -45,7 +45,7 @@ export const SPICE_DETECTION_RULES: SpiceRule[] = [
   {
     signal: 'EDGE_CASE_ARMOR',
     points: 35,
-    regex: /\b(try\s*\{|catch\s*\(|finally\s*\{|Number\.isFinite|Number\.isNaN|Array\.isArray|\?\?)/,
+    regex: /\b(try\s*\{|catch\s*\(|finally\s*\{|Number\.isFinite|Number\.isNaN|Array\.isArray)\b/,
   },
   {
     signal: 'BLACK_MAGIC_WIZARDRY',
@@ -113,8 +113,149 @@ export function getScovilleTier(score: number): ScovilleTier {
 }
 
 /**
+ * Pass 1: Hard Boilerplate Kill-List.
+ * Rejects env-var readers, config getters, trivial getters/setters, type-only blocks,
+ * and flat plumbing functions with fewer than 2 control-flow decisions.
+ */
+export function isMundaneBoilerplate(symbolName: string, rawCode: string): boolean {
+  const trimmed = rawCode.trim();
+  if (!trimmed) {
+    return true;
+  }
+
+  // Pure type/interface declarations have no runtime logic or edge cases
+  if (/^(?:export\s+)?(?:interface|type)\s+/m.test(trimmed) && !/\b(?:function|=>)\b/.test(trimmed)) {
+    return true;
+  }
+
+  const branchMatches = trimmed.match(
+    /\b(?:if|else\s+if|for|while|switch|case|catch)\b|&&|\|\||\.(?:reduce|filter|some|every)\s*\(/g
+  );
+  const branchCount = branchMatches ? branchMatches.length : 0;
+
+  // Env-var / config plumbing (e.g. `process.env.X ?? 'default'`, `getConfiguration`)
+  const envConfigHits = (
+    trimmed.match(/\b(?:process\.env|import\.meta\.env|getConfiguration|dotenv)\b/g) ?? []
+  ).length;
+  if (envConfigHits >= 1 && branchCount < 3) {
+    return true;
+  }
+
+  // Trivial getters/setters/constructors with < 2 decisions
+  if (/^(?:get|set)[A-Z_]|^constructor$/.test(symbolName) && branchCount < 2) {
+    return true;
+  }
+
+  // Any flat function with < 2 control-flow decisions is plumbing, not interesting business logic
+  const hasAsync = /\bawait\b/.test(trimmed);
+  if (branchCount < 2 && !(hasAsync && branchCount >= 1)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Pass 2: Structural Cognitive Complexity Scorer.
+ * Rewards nested branching, async state mutations, and compound decision density.
+ */
+export function computeCognitiveComplexity(rawCode: string): number {
+  const lines = rawCode.split(/\r?\n/);
+  let score = 0;
+  let braceDepth = 0;
+  let hasAwait = false;
+  let hasStateMutation = false;
+
+  for (const line of lines) {
+    const isControlFlow = /\b(?:if|else\s+if|for|while|switch|catch)\b/.test(line);
+    if (isControlFlow) {
+      // Deeper nesting adds exponentially more cognitive load
+      const nestingLevel = Math.max(0, braceDepth - 1);
+      score += 10 + nestingLevel * 20;
+    }
+
+    const compoundOps = line.match(/&&|\|\||\.(?:reduce|filter)\s*\(/g);
+    if (compoundOps) {
+      score += compoundOps.length * 10;
+    }
+
+    if (/\bawait\b/.test(line)) {
+      hasAwait = true;
+    }
+    if (/(?:\.[a-zA-Z0-9_]+\s*=|\.(?:push|pop|set|add|delete|clear|splice|update)\s*\(|\+\+|--)/.test(line)) {
+      hasStateMutation = true;
+    }
+
+    for (const ch of line) {
+      if (ch === '{') {
+        braceDepth++;
+      } else if (ch === '}') {
+        braceDepth = Math.max(0, braceDepth - 1);
+      }
+    }
+  }
+
+  // Async + state mutation is where race conditions and partial-failure bugs live
+  if (hasAwait && hasStateMutation) {
+    score += 30;
+  }
+
+  return score;
+}
+
+/**
+ * Pass 3: Lightweight Cross-Function Caller/Callee Linker.
+ * Populates `callsTo` and `calledBy` across harvested candidates and awards
+ * a Hub Bonus to central orchestrator functions.
+ */
+export function linkSymbolCallGraph(candidates: CandidateSymbol[]): CandidateSymbol[] {
+  const byName = new Map<string, CandidateSymbol[]>();
+  for (const c of candidates) {
+    if (c.symbolName.length < 4) {
+      continue;
+    }
+    const list = byName.get(c.symbolName) ?? [];
+    list.push(c);
+    byName.set(c.symbolName, list);
+  }
+
+  for (const caller of candidates) {
+    const callsTo = new Set<string>();
+    for (const [targetName, targets] of byName.entries()) {
+      if (targetName === caller.symbolName) {
+        continue;
+      }
+      const callRegex = new RegExp(`\\b${targetName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\(`);
+      if (callRegex.test(caller.code)) {
+        callsTo.add(targetName);
+        for (const t of targets) {
+          if (!t.calledBy.includes(caller.symbolName)) {
+            t.calledBy.push(caller.symbolName);
+          }
+        }
+      }
+    }
+    caller.callsTo = Array.from(callsTo).slice(0, 6);
+  }
+
+  for (const c of candidates) {
+    c.calledBy = c.calledBy.slice(0, 6);
+    c.relatedSymbols = Array.from(new Set([...c.callsTo, ...c.calledBy]));
+    if (c.calledBy.length >= 2 || c.callsTo.length >= 3) {
+      if (!c.spiceSignals.includes('MAIN_CHARACTER_HUB')) {
+        c.spiceSignals.push('MAIN_CHARACTER_HUB');
+        c.scovilleScore += 25;
+        c.scovilleTier = getScovilleTier(c.scovilleScore);
+      }
+    }
+  }
+
+  return candidates;
+}
+
+/**
  * Analyzes a raw code block and returns its Scoville score, tier, detected signals,
- * and 1-based spicy line numbers.
+ * cognitive complexity, and 1-based spicy line numbers.
  */
 export function scoreCodeSpice(
   rawCode: string,
@@ -125,10 +266,12 @@ export function scoreCodeSpice(
   scovilleTier: ScovilleTier;
   spiceSignals: SpiceSignalType[];
   spicyLineNumbers: number[];
+  cognitiveComplexity: number;
 } {
   const signals = new Set<SpiceSignalType>();
   const spicyLines = new Set<number>();
-  let score = 0;
+  const cognitiveComplexity = computeCognitiveComplexity(rawCode);
+  let score = Math.min(80, Math.floor(cognitiveComplexity * 0.6));
 
   const lines = rawCode.split(/\r?\n/);
 
@@ -163,6 +306,7 @@ export function scoreCodeSpice(
     scovilleTier: getScovilleTier(score),
     spiceSignals: Array.from(signals),
     spicyLineNumbers: Array.from(spicyLines).slice(0, 4),
+    cognitiveComplexity,
   };
 }
 
@@ -206,6 +350,9 @@ export function createSafeCandidateSymbol(params: {
     spiceSignals: spice.spiceSignals,
     spicyLineNumbers: spice.spicyLineNumbers,
     relatedSymbols: params.relatedSymbols ?? [],
+    cognitiveComplexity: spice.cognitiveComplexity,
+    callsTo: [],
+    calledBy: [],
   };
 }
 
@@ -444,8 +591,12 @@ export async function harvestWorkspaceSymbols(): Promise<CandidateSymbol[]> {
       chunks = chunkFileByRegex(fileContent);
     }
 
-    // 6. Create safe candidate symbols
+    // 6. Filter out mundane boilerplate and create safe candidate symbols
     for (const chunk of chunks) {
+      if (isMundaneBoilerplate(chunk.name, chunk.rawCode)) {
+        continue;
+      }
+
       const candidate = createSafeCandidateSymbol({
         filePath: relPath,
         symbolName: chunk.name,
@@ -462,7 +613,8 @@ export async function harvestWorkspaceSymbols(): Promise<CandidateSymbol[]> {
     }
   }
 
-  // 7. Sort candidates descending by Scoville score
+  // 7. Link cross-function caller/callee relationships and sort descending
+  linkSymbolCallGraph(candidates);
   candidates.sort((a, b) => b.scovilleScore - a.scovilleScore);
 
   // 8. Enrich top 10 candidates with git context

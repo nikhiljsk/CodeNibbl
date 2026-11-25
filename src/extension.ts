@@ -31,6 +31,7 @@ import {
   createSafeCandidateSymbol,
   detectLanguageFromPath,
   harvestWorkspaceSymbols,
+  isMundaneBoilerplate,
 } from './harvester/spiceHarvester';
 import { isSensitiveFilePath } from './security/secretScrubber';
 
@@ -77,10 +78,17 @@ export function activate(context: vscode.ExtensionContext): void {
   const sidebarProvider = new NibblSidebarProvider(
     context.extensionUri,
     generator,
-    seenLedger
+    seenLedger,
+    () => {
+      void topUpQueueAsync();
+    }
   );
 
   async function refreshCandidates(): Promise<CandidateSymbol[]> {
+    if (!vscode.workspace.workspaceFolders?.length) {
+      cachedCandidates = [];
+      return cachedCandidates;
+    }
     if (isRefreshingCandidates) {
       return cachedCandidates;
     }
@@ -100,7 +108,7 @@ export function activate(context: vscode.ExtensionContext): void {
    * Pre-cooks Nibbl cards until queue depth reaches `codenibbl.preCookedQueueSize`.
    */
   async function topUpQueueAsync(): Promise<void> {
-    if (isToppingUp) {
+    if (!vscode.workspace.workspaceFolders?.length || isToppingUp) {
       return;
     }
     isToppingUp = true;
@@ -119,6 +127,9 @@ export function activate(context: vscode.ExtensionContext): void {
           break;
         }
         await context.workspaceState.update(LEDGER_STORAGE_KEY, seenLedger.getState());
+        if (!sidebarProvider.hasDisplayedCard()) {
+          sidebarProvider.renderCurrentCard(true);
+        }
         // Small pacing delay to avoid aggressive rate-limiting
         await new Promise((r) => setTimeout(r, 600));
       }
@@ -205,6 +216,9 @@ export function activate(context: vscode.ExtensionContext): void {
         const language = detectLanguageFromPath(doc.uri.fsPath);
 
         for (const chunk of chunks) {
+          if (isMundaneBoilerplate(chunk.name, chunk.rawCode)) {
+            continue;
+          }
           const freshCandidate = createSafeCandidateSymbol({
             filePath: relPath,
             symbolName: chunk.name,
@@ -277,11 +291,27 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  // Non-blocking initial warm-up
-  void (async () => {
-    await refreshCandidates();
-    await topUpQueueAsync();
-  })();
+  // Refresh sidebar & harvest whenever a project folder is opened or closed
+  if ('onDidChangeWorkspaceFolders' in vscode.workspace) {
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeWorkspaceFolders(async () => {
+        cachedCandidates = [];
+        sidebarProvider.renderCurrentCard(true);
+        if (vscode.workspace.workspaceFolders?.length) {
+          await refreshCandidates();
+          await topUpQueueAsync();
+        }
+      })
+    );
+  }
+
+  // Non-blocking initial warm-up (only when a workspace folder is open)
+  if (vscode.workspace.workspaceFolders?.length) {
+    void (async () => {
+      await refreshCandidates();
+      await topUpQueueAsync();
+    })();
+  }
 }
 
 export function deactivate(): void {}
