@@ -143,6 +143,55 @@ describe('Webview HTML Builder & Mascot Assets', () => {
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html).not.toContain('alert(1)</script>');
   });
+
+  it('renders shimmer Cooking loader instead of Connect Model screen while cooking', () => {
+    const html = buildWebviewHtml({
+      cspSource: 'vscode-webview://test',
+      cards: [],
+      isCooking: true,
+      emptyState: 'cooking',
+      vibeMode: 'genz_hype',
+      providerLabel: 'openai',
+      stats: { nibblsMunched: 0, quizzesSolved: 0 },
+    });
+
+    expect(html).toContain('spinner-ring');
+    expect(html).toContain('shimmer-line');
+    expect(html).not.toContain('Connect a Model to Start');
+  });
+
+  it('renders strictly ONE card on stage while keeping pre-cooked cards ready in memory, with Light Mode rules and valid JS', () => {
+    const secondCard: NibblCard = {
+      ...sampleCard,
+      id: 'test-card-2',
+      headline: 'Second pre-cooked card buffered in memory!',
+    };
+
+    const html = buildWebviewHtml({
+      cspSource: 'vscode-webview://test',
+      cards: [sampleCard, secondCard],
+      isCooking: true,
+      vibeMode: 'genz_hype',
+      providerLabel: 'openai',
+      stats: { nibblsMunched: 2, quizzesSolved: 1 },
+    });
+
+    // Strictly ONE `<h2 class="headline">` mounted in the DOM (not a multi-card blog!)
+    const renderedHeadlines = html.match(/<h2 class="headline">/g) ?? [];
+    expect(renderedHeadlines).toHaveLength(1);
+    expect(html).toContain('body.vscode-light');
+    expect(html).toContain('1 / 2 Ready');
+    expect(html).toContain('Next Nibbl (1 ready)');
+    // Second card is buffered in STATE.deck JSON for 0ms instant transition
+    expect(html).toContain('Second pre-cooked card buffered in memory!');
+    // Scrolling stays inside the active card (no wheel-to-next-card listener)
+    expect(html).not.toContain("addEventListener(\n          'wheel'");
+    expect(html).not.toContain('lastWheelStepAt');
+
+    const match = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/);
+    expect(match).not.toBeNull();
+    expect(() => new Function(match![1])).not.toThrow();
+  });
 });
 
 describe('SecretManager & Keychain Storage', () => {

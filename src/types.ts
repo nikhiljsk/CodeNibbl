@@ -190,6 +190,8 @@ export interface SeenLedgerState {
 export type WebviewIncomingMessage =
   | { type: 'READY' }
   | { type: 'SPIN_NEXT_NIBBL' }
+  | { type: 'REQUEST_MORE_CARDS' }
+  | { type: 'RESET_SEEN_HISTORY' }
   | { type: 'JUMP_TO_CODE'; filePath: string; line: number; endLine?: number }
   | { type: 'SWITCH_VIBE'; vibeMode: VibeMode }
   | { type: 'QUIZ_SOLVED'; cardId: string }
@@ -208,4 +210,19 @@ export type WebviewOutgoingMessage =
       vibeMode: VibeMode;
       stats: { nibblsMunched: number; quizzesSolved: number };
       providerLabel: string;
+    }
+  | {
+      type: 'APPEND_CARD';
+      card: NibblCard;
+      renderedMermaidSvg: string | null;
+      flexMarkdown: string;
+      mascotLabel: string;
+      customMascotUri?: string;
+      isCooking: boolean;
+    }
+  | {
+      type: 'COOKING_STATUS';
+      isCooking: boolean;
+      allSeen?: boolean;
+      errorHint?: string;
     };

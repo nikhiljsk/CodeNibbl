@@ -33,7 +33,10 @@ import {
   harvestWorkspaceSymbols,
   isMundaneBoilerplate,
 } from './harvester/spiceHarvester';
-import { isSensitiveFilePath } from './security/secretScrubber';
+import {
+  isSensitiveFilePath,
+  redactSecretsFromError,
+} from './security/secretScrubber';
 
 const LEDGER_STORAGE_KEY = 'codenibbl.seenLedger.v1';
 
@@ -74,6 +77,19 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   );
 
+  const isModelConfigured = async (): Promise<boolean> => {
+    const cfg = vscode.workspace.getConfiguration('codenibbl');
+    const provider = cfg.get<LLMProviderType>('provider', 'vscode-lm');
+    if (provider === 'vscode-lm') {
+      return true;
+    }
+    if (provider === 'custom') {
+      return Boolean(cfg.get<string>('customBaseUrl', '').trim());
+    }
+    const key = await secretManager.getApiKey(provider);
+    return Boolean(key && key.trim());
+  };
+
   const generator = new NibblGenerator(seenLedger, llmRouter);
   const sidebarProvider = new NibblSidebarProvider(
     context.extensionUri,
@@ -81,7 +97,8 @@ export function activate(context: vscode.ExtensionContext): void {
     seenLedger,
     () => {
       void topUpQueueAsync();
-    }
+    },
+    isModelConfigured
   );
 
   async function refreshCandidates(): Promise<CandidateSymbol[]> {
@@ -105,36 +122,72 @@ export function activate(context: vscode.ExtensionContext): void {
 
   /**
    * Non-blocking background queue top-up loop.
-   * Pre-cooks Nibbl cards until queue depth reaches `codenibbl.preCookedQueueSize`.
+   * Pre-cooks a batch of Nibbl cards and streams them live into the TikTok deck!
    */
   async function topUpQueueAsync(): Promise<void> {
     if (!vscode.workspace.workspaceFolders?.length || isToppingUp) {
       return;
     }
+    if (!(await isModelConfigured())) {
+      sidebarProvider.notifyCookingStatus({ isCooking: false, errorHint: '' });
+      return;
+    }
+
     isToppingUp = true;
+    sidebarProvider.notifyCookingStatus({ isCooking: true, errorHint: '' });
+
     try {
       const config = vscode.workspace.getConfiguration('codenibbl');
-      const targetSize = config.get<number>('preCookedQueueSize', 5);
+      const targetBatch = config.get<number>('preCookedQueueSize', 5);
       const vibeMode = config.get<VibeMode>('vibeMode', 'genz_hype');
 
       if (cachedCandidates.length === 0) {
         await refreshCandidates();
       }
 
-      while (generator.getQueueDepth() < targetSize && cachedCandidates.length > 0) {
+      let cookedInThisRun = 0;
+      while (cookedInThisRun < targetBatch && cachedCandidates.length > 0) {
         const card = await generator.cookNextCardAsync(cachedCandidates, vibeMode);
         if (!card) {
+          // No more unseen eligible functions left in the repo!
+          const noUnseenLeft =
+            cachedCandidates.length > 0 &&
+            seenLedger.pickTournamentBatch(cachedCandidates, 1) === null;
+          sidebarProvider.notifyCookingStatus({
+            isCooking: false,
+            allSeen: noUnseenLeft,
+          });
+          return;
+        }
+
+        cookedInThisRun += 1;
+        await context.workspaceState.update(LEDGER_STORAGE_KEY, seenLedger.getState());
+
+        const moreComing =
+          cookedInThisRun < targetBatch &&
+          seenLedger.pickTournamentBatch(cachedCandidates, 1) !== null;
+        sidebarProvider.absorbCookedCards(moreComing);
+
+        if (!moreComing) {
           break;
         }
-        await context.workspaceState.update(LEDGER_STORAGE_KEY, seenLedger.getState());
-        if (!sidebarProvider.hasDisplayedCard()) {
-          sidebarProvider.renderCurrentCard(true);
-        }
         // Small pacing delay to avoid aggressive rate-limiting
-        await new Promise((r) => setTimeout(r, 600));
+        await new Promise((r) => setTimeout(r, 500));
       }
-    } catch {
-      // Non-blocking: background loop fails silently without interrupting the editor
+
+      const allExhausted =
+        cachedCandidates.length > 0 &&
+        seenLedger.pickTournamentBatch(cachedCandidates, 1) === null;
+      sidebarProvider.notifyCookingStatus({
+        isCooking: false,
+        allSeen: allExhausted,
+      });
+    } catch (err) {
+      const safeErr = redactSecretsFromError(err);
+      sidebarProvider.notifyCookingStatus({
+        isCooking: false,
+        errorHint: safeErr,
+      });
     } finally {
       isToppingUp = false;
     }
@@ -248,7 +301,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand('codenibbl.spinRandomNibbl', async () => {
-      sidebarProvider.renderCurrentCard();
+      await sidebarProvider.renderCurrentCard(true);
       await context.workspaceState.update(LEDGER_STORAGE_KEY, seenLedger.getState());
       await vscode.commands.executeCommand('codenibbl.feedView.focus');
       void topUpQueueAsync();
@@ -256,6 +309,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand('codenibbl.configureModel', async () => {
       await secretManager.runInteractiveSetup(llmRouter);
+      sidebarProvider.notifyCookingStatus({ isCooking: true, errorHint: '' });
       void topUpQueueAsync();
     }),
 
@@ -272,14 +326,17 @@ export function activate(context: vscode.ExtensionContext): void {
         await vscode.workspace
           .getConfiguration('codenibbl')
           .update('vibeMode', pick.value, vscode.ConfigurationTarget.Global);
-        sidebarProvider.renderCurrentCard();
+        await sidebarProvider.renderCurrentCard(false);
       }
     }),
 
     vscode.commands.registerCommand('codenibbl.clearSeenLedger', async () => {
       seenLedger.reset();
+      sidebarProvider.clearSessionDeck();
       await context.workspaceState.update(LEDGER_STORAGE_KEY, seenLedger.getState());
-      vscode.window.showInformationMessage('🧹 CodeNibbl Seen History cleared!');
+      await sidebarProvider.renderCurrentCard(false);
+      vscode.window.showInformationMessage('🧹 CodeNibbl Seen History cleared! Cooking fresh Nibbls...');
+      void topUpQueueAsync();
     }),
 
     vscode.commands.registerCommand('codenibbl.githubSponsors', async () => {
@@ -296,7 +353,8 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
       vscode.workspace.onDidChangeWorkspaceFolders(async () => {
         cachedCandidates = [];
-        sidebarProvider.renderCurrentCard(true);
+        sidebarProvider.clearSessionDeck();
+        await sidebarProvider.renderCurrentCard(true);
         if (vscode.workspace.workspaceFolders?.length) {
           await refreshCandidates();
           await topUpQueueAsync();

@@ -40,7 +40,7 @@ export const OPENING_HOOK_STYLES: string[] = [
 
 const MAX_RECENT_HEADLINES = 20;
 const ARCHETYPE_COOLDOWN_WINDOW = 3;
-const MAX_LENSES_PER_SYMBOL = 3;
+const MAX_LENSES_PER_SYMBOL = 1;
 
 export class SeenLedger {
   private state: SeenLedgerState;
@@ -98,11 +98,27 @@ export class SeenLedger {
   }
 
   /**
-   * Selects the best next (CandidateSymbol, NibblArchetype) pair that:
-   * 1. Has NOT been seen for its current `codeHash`
-   * 2. Has used fewer than `MAX_LENSES_PER_SYMBOL` archetypes overall
-   * 3. Does NOT repeat any of the last `ARCHETYPE_COOLDOWN_WINDOW` archetypes
-   * 4. Matches the symbol's detected `SpiceSignals` (e.g., `DEV_CONFESSION_COMMENT` -> `CAUGHT_IN_4K`)
+   * Checks whether ANY Nibbl has already been generated for this function/symbol.
+   * Once a function produces a Nibbl, it is remembered and skipped completely
+   * until the user resets their seen history.
+   */
+  public hasSeenSymbol(
+    symbol: Pick<CandidateSymbol, 'filePath' | 'symbolName'>
+  ): boolean {
+    const symbolKey = SeenLedger.buildSymbolKey(symbol);
+    const history = this.state.symbolArchetypeHistory[symbolKey];
+    if (history && history.length >= MAX_LENSES_PER_SYMBOL) {
+      return true;
+    }
+    const prefix = `${symbolKey}::`;
+    return this.state.seenComboKeys.some((k) => k.startsWith(prefix));
+  }
+
+  /**
+   * Selects the best next (CandidateSymbol, NibblArchetype) pair for an unseen function:
+   * 1. Skips any function where `hasSeenSymbol(symbol)` is true (1 function = 1 Nibbl!)
+   * 2. Does NOT repeat any of the last `ARCHETYPE_COOLDOWN_WINDOW` archetypes
+   * 3. Matches the symbol's detected `SpiceSignals`
    */
   public pickNextFreshTarget(
     candidates: CandidateSymbol[]
@@ -114,10 +130,7 @@ export class SeenLedger {
     const cooldownSet = new Set(this.state.recentArchetypes.slice(-ARCHETYPE_COOLDOWN_WINDOW));
 
     for (const symbol of candidates) {
-      const symbolKey = SeenLedger.buildSymbolKey(symbol);
-      const usedArchetypes = this.state.symbolArchetypeHistory[symbolKey] ?? [];
-
-      if (usedArchetypes.length >= MAX_LENSES_PER_SYMBOL) {
+      if (this.hasSeenSymbol(symbol)) {
         continue;
       }
 
@@ -126,7 +139,7 @@ export class SeenLedger {
         if (cooldownSet.has(archetype)) {
           continue;
         }
-        if (!this.hasSeenCombo(symbol, archetype) && !usedArchetypes.includes(archetype)) {
+        if (!this.hasSeenCombo(symbol, archetype)) {
           const hookStyle =
             OPENING_HOOK_STYLES[this.state.hookCadenceIndex % OPENING_HOOK_STYLES.length];
           return { symbol, archetype, hookStyle };
@@ -134,8 +147,11 @@ export class SeenLedger {
       }
     }
 
-    // Fallback: relax cooldown window if all non-cooldown combos are exhausted
+    // Fallback: relax archetype cooldown window ONLY for still-unseen functions
     for (const symbol of candidates) {
+      if (this.hasSeenSymbol(symbol)) {
+        continue;
+      }
       for (const archetype of ALL_ARCHETYPES) {
         if (!this.hasSeenCombo(symbol, archetype)) {
           const hookStyle =
@@ -149,12 +165,12 @@ export class SeenLedger {
   }
 
   /**
-   * Selects a diverse batch of up to `batchSize` (default 5) unseen candidates
-   * for the "Tournament of 5" LLM curation prompt.
+   * Selects a diverse batch of up to `batchSize` (default 5) completely unseen
+   * functions for the "Tournament of 5" LLM curation prompt.
    *
    * Prioritizes:
-   * 1. Distinct file paths so the LLM compares genuinely different parts of the repo.
-   * 2. Symbols with unused archetype slots (< MAX_LENSES_PER_SYMBOL).
+   * 1. Strictly unseen functions (`!hasSeenSymbol(symbol)` — never repeats a function!).
+   * 2. Distinct file paths so the LLM compares genuinely different parts of the repo.
    * 3. Non-cooldown archetypes so the feed stays varied.
    */
   public pickTournamentBatch(
@@ -178,14 +194,10 @@ export class SeenLedger {
     const selectedKeys = new Set<string>();
 
     const isEligible = (symbol: CandidateSymbol): boolean => {
-      const symbolKey = SeenLedger.buildSymbolKey(symbol);
-      const usedArchetypes = this.state.symbolArchetypeHistory[symbolKey] ?? [];
-      if (usedArchetypes.length >= MAX_LENSES_PER_SYMBOL) {
+      if (this.hasSeenSymbol(symbol)) {
         return false;
       }
-      return effectiveAllowed.some(
-        (arch) => !this.hasSeenCombo(symbol, arch) && !usedArchetypes.includes(arch)
-      );
+      return effectiveAllowed.some((arch) => !this.hasSeenCombo(symbol, arch));
     };
 
     // Pass 1: Pick highest-ranked eligible symbols from distinct files

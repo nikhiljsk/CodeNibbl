@@ -27,7 +27,7 @@ interface FlowEdge {
   dashed: boolean;
 }
 
-const LAYER_ACCENTS = ['#00f5d4', '#ff9f1c', '#9b5de5', '#ff4d6d', '#fee440'];
+const LAYER_ACCENTS = ['#00b89c', '#ff9f1c', '#8b5cf6', '#f43f5e', '#d97706'];
 
 /**
  * Parses a single node token like `A["Raw Repo Code"]`, `B("Check")`, `C{"Valid?"}`, or `D`.
@@ -351,7 +351,7 @@ function renderFlowchartSvg(
         ? `<text x="${(x1 + x2) / 2}" y="${(y1 + y2) / 2 - 4}" text-anchor="middle" fill="var(--vscode-foreground, #e5e5e5)" font-size="10" font-weight="700">${escapeHtml(truncateLabel(e.label, 18))}</text>`
         : '';
 
-      return `<path d="${pathD}" fill="none" stroke="rgba(255,255,255,0.45)" stroke-width="2"${dashAttr} marker-end="url(#nibbl-arrow)" />${labelSvg}`;
+      return `<path d="${pathD}" fill="none" stroke="var(--nibbl-svg-edge, rgba(128,128,128,0.65))" stroke-width="2"${dashAttr} marker-end="url(#nibbl-arrow)" />${labelSvg}`;
     })
     .join('\n    ');
 
@@ -365,7 +365,7 @@ function renderFlowchartSvg(
       const cy = pos.y + pos.h / 2;
 
       return `<g>
-      <rect x="${pos.x}" y="${pos.y}" width="${pos.w}" height="${pos.h}" rx="${rx}" fill="rgba(255,255,255,0.06)" stroke="${accent}" stroke-width="2" />
+      <rect x="${pos.x}" y="${pos.y}" width="${pos.w}" height="${pos.h}" rx="${rx}" fill="var(--nibbl-svg-node-bg, rgba(128,128,128,0.08))" stroke="${accent}" stroke-width="2" />
       <text x="${cx}" y="${cy + 4}" text-anchor="middle" fill="var(--vscode-foreground, #f5f5f5)" font-size="11.5" font-weight="700">${safeLabel}</text>
     </g>`;
     })
@@ -374,7 +374,7 @@ function renderFlowchartSvg(
   return `<svg class="nibbl-mermaid-svg" viewBox="0 0 ${Math.ceil(totalWidth)} ${Math.ceil(totalHeight)}" width="100%" role="img" aria-label="Architecture Flow Diagram" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <marker id="nibbl-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-        <path d="M 0 1 L 10 5 L 0 9 z" fill="rgba(255,255,255,0.65)" />
+        <path d="M 0 1 L 10 5 L 0 9 z" fill="var(--nibbl-svg-edge, rgba(128,128,128,0.75))" />
       </marker>
     </defs>
     ${edgeSvgs}
@@ -448,8 +448,8 @@ function renderSequenceSvg(dsl: string): string | null {
       xById.set(p.id, cx);
       const accent = LAYER_ACCENTS[idx % LAYER_ACCENTS.length];
       return `<g>
-      <line x1="${cx}" y1="${padY + headerH}" x2="${cx}" y2="${totalH - padY}" stroke="rgba(255,255,255,0.22)" stroke-width="1.5" stroke-dasharray="4,4" />
-      <rect x="${cx - 46}" y="${padY}" width="92" height="${headerH}" rx="8" fill="rgba(255,255,255,0.06)" stroke="${accent}" stroke-width="2" />
+      <line x1="${cx}" y1="${padY + headerH}" x2="${cx}" y2="${totalH - padY}" stroke="var(--nibbl-svg-edge, rgba(128,128,128,0.35))" stroke-width="1.5" stroke-dasharray="4,4" />
+      <rect x="${cx - 46}" y="${padY}" width="92" height="${headerH}" rx="8" fill="var(--nibbl-svg-node-bg, rgba(128,128,128,0.08))" stroke="${accent}" stroke-width="2" />
       <text x="${cx}" y="${padY + 19}" text-anchor="middle" fill="var(--vscode-foreground, #f5f5f5)" font-size="11" font-weight="700">${escapeHtml(truncateLabel(p.label, 14))}</text>
     </g>`;
     })
@@ -465,7 +465,7 @@ function renderSequenceSvg(dsl: string): string | null {
       const y = padY + headerH + 26 + idx * msgStep;
       const dash = m.dashed ? ' stroke-dasharray="5,4"' : '';
       return `<g>
-      <line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="rgba(255,255,255,0.6)" stroke-width="2"${dash} marker-end="url(#nibbl-arrow)" />
+      <line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="var(--nibbl-svg-edge, rgba(128,128,128,0.65))" stroke-width="2"${dash} marker-end="url(#nibbl-arrow)" />
       <text x="${(x1 + x2) / 2}" y="${y - 6}" text-anchor="middle" fill="var(--vscode-foreground, #f5f5f5)" font-size="10.5" font-weight="600">${escapeHtml(truncateLabel(m.text, 24))}</text>
     </g>`;
     })
@@ -474,7 +474,7 @@ function renderSequenceSvg(dsl: string): string | null {
   return `<svg class="nibbl-mermaid-svg" viewBox="0 0 ${totalW} ${totalH}" width="100%" role="img" aria-label="Sequence Diagram" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <marker id="nibbl-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-        <path d="M 0 1 L 10 5 L 0 9 z" fill="rgba(255,255,255,0.7)" />
+        <path d="M 0 1 L 10 5 L 0 9 z" fill="var(--nibbl-svg-edge, rgba(128,128,128,0.75))" />
       </marker>
     </defs>
     ${headerSvgs}

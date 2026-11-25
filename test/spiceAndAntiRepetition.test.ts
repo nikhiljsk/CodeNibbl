@@ -232,7 +232,35 @@ describe('6-Layer Anti-Repetition Engine (SeenLedger)', () => {
     expect(card!.codeSnippet?.filePath).toBe('src/c.ts');
     expect(card!.suggestedFix).toContain('Negative input');
     expect(ledger.hasSeenCombo(candidates[2], 'MISSED_EDGE_CASE')).toBe(true);
+    expect(ledger.hasSeenSymbol(candidates[2])).toBe(true);
     expect(ledger.hasSeenCombo(candidates[0], 'MISSED_EDGE_CASE')).toBe(false);
+  });
+
+  it('skips a function completely once 1 Nibbl is generated from it (never repeats with a different explanation)', () => {
+    const onlySymbol = createSafeCandidateSymbol({
+      filePath: 'src/auth.ts',
+      symbolName: 'verifySession',
+      startLine: 1,
+      endLine: 15,
+      language: 'typescript',
+      rawCode: 'if (!session || session.expired) { throw new Error("Expired"); } return session;',
+    })!;
+
+    const ledger = new SeenLedger();
+    const firstBatch = ledger.pickTournamentBatch([onlySymbol], 5);
+    expect(firstBatch).not.toBeNull();
+
+    ledger.recordGeneratedNibbl({
+      symbol: onlySymbol,
+      archetype: 'GLAZE_THE_DEV',
+      headline: 'First insight',
+      whyItMatters: 'Why 1',
+    });
+
+    // Must NOT pick `verifySession` again under any other archetype!
+    expect(ledger.hasSeenSymbol(onlySymbol)).toBe(true);
+    expect(ledger.pickTournamentBatch([onlySymbol], 5)).toBeNull();
+    expect(ledger.pickNextFreshTarget([onlySymbol])).toBeNull();
   });
 });
 

@@ -92,6 +92,8 @@ export function validateWebviewMessage(raw: unknown): WebviewIncomingMessage | n
   switch (msg.type) {
     case 'READY':
     case 'SPIN_NEXT_NIBBL':
+    case 'REQUEST_MORE_CARDS':
+    case 'RESET_SEEN_HISTORY':
     case 'CONFIGURE_MODEL':
     case 'OPEN_FOLDER':
     case 'GITHUB_SPONSORS':

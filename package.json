@@ -2,7 +2,7 @@
   "name": "codenibbl",
   "displayName": "CodeNibbl — Snack on Your Codebase While AI Codes",
   "description": "Stop doomscrolling while your AI codes! Async bite-sized codebase insights, edge-case highlights, interactive quizzes, and flow diagrams powered by any LLM.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "StickyCliff",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -33,6 +33,9 @@
     "codenibbl"
   ],
   "activationEvents": [
+    "onView:codenibbl.feedView",
+    "onCommand:codenibbl.openFeed",
+    "onCommand:codenibbl.spinRandomNibbl",
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
